@@ -33,7 +33,15 @@ Simulação de tracking de eventos (cliques/visualizações) em Java com Spring 
 ./gradlew test
 ```
 
-Os testes de integração usam Testcontainers e sobem Kafka e MongoDB reais em containers — é necessário ter Docker disponível.
+Os testes de integração usam Testcontainers e sobem Kafka e MongoDB reais em containers — é necessário ter Docker disponível. Suíte completa: **5 testes, todos passando** — 2 unitários e 3 de integração.
+
+### Nota sobre Testcontainers e Docker Engine recente
+
+Se os testes falharem com `client version 1.32 is too old. Minimum supported API version is 1.40`, a causa é o `docker-java` embutido no Testcontainers negociar a API 1.32, abaixo do mínimo aceito pelo Docker Engine 29+. Correção global, de uma linha:
+
+```bash
+echo 'api.version=1.44' > ~/.docker-java.properties
+```
 
 ## Como a agregação por janela funciona
 
