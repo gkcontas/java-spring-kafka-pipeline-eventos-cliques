@@ -1,51 +1,42 @@
 # Pipeline de Eventos de Cliques
 
-Simulação de tracking de eventos (cliques/visualizações) em Java com Spring Boot: um producer publica eventos no Kafka, um consumer agrega por página e janela de um minuto e grava/atualiza o resultado no MongoDB, e um endpoint expõe as métricas agregadas.
+Pipeline de tracking de eventos: um producer publica cliques no Kafka, um consumer agrega as contagens por página em janelas de um minuto e grava o resultado no MongoDB, e um endpoint expõe as métricas já agregadas.
 
-## Status
+É o desenho clássico de ingestão de eventos em alto volume — escrever rápido no broker, processar fora do caminho da requisição e consultar um resultado pré-agregado.
 
-✅ MVP implementado.
+## Tecnologias e bibliotecas
 
-## Stack
+| | |
+|---|---|
+| Linguagem | Java 17 |
+| Framework | Spring Boot 3.3 |
+| Mensageria | Apache Kafka via Spring Kafka |
+| Persistência | MongoDB 7 via Spring Data MongoDB |
+| Validação | Bean Validation |
+| Build | Gradle Kotlin DSL (wrapper `gradlew`) |
+| Testes | JUnit 5, Mockito, Awaitility, Testcontainers (Kafka e MongoDB) |
+| Apoio | Lombok |
 
-- Java 17 + Spring Boot 3.3
-- Apache Kafka (Spring Kafka)
-- MongoDB (Spring Data MongoDB)
-- Lombok (na entidade `PageMetric`)
-- Gradle (Kotlin DSL) + wrapper `gradlew`
-- Testcontainers (Kafka + MongoDB) + Awaitility + JUnit 5 + Mockito
+## Pré-requisitos
+
+- JDK 17 ou superior
+- Docker
 
 ## Como rodar
 
-1. Suba Kafka e MongoDB:
-   ```bash
-   docker compose up -d
-   ```
-2. Rode a aplicação:
-   ```bash
-   ./gradlew bootRun
-   ```
-3. A API sobe em `http://localhost:8080`.
-
-## Como rodar os testes
-
 ```bash
-./gradlew test
+docker compose up -d
 ```
 
-Os testes de integração usam Testcontainers e sobem Kafka e MongoDB reais em containers — é necessário ter Docker disponível. Suíte completa: **5 testes, todos passando** — 2 unitários e 3 de integração.
-
-### Nota sobre Testcontainers e Docker Engine recente
-
-Se os testes falharem com `client version 1.32 is too old. Minimum supported API version is 1.40`, a causa é o `docker-java` embutido no Testcontainers negociar a API 1.32, abaixo do mínimo aceito pelo Docker Engine 29+. Correção global, de uma linha:
-
 ```bash
-echo 'api.version=1.44' > ~/.docker-java.properties
+./gradlew bootRun
 ```
 
-## Como a agregação por janela funciona
+A API fica em `http://localhost:8080`.
 
-Cada evento de clique carrega um `timestamp`. Ao ser consumido, esse timestamp é truncado para o minuto (`Instant.truncatedTo(ChronoUnit.MINUTES)`), formando a "janela" do evento. O par `(página, janela)` vira a chave de um documento na coleção `page_metrics` do MongoDB:
+## Como a agregação funciona
+
+Cada evento carrega um timestamp, truncado para o minuto na hora do consumo. O par `(página, janela)` identifica um documento na coleção `page_metrics`:
 
 ```json
 {
@@ -56,28 +47,36 @@ Cada evento de clique carrega um `timestamp`. Ao ser consumido, esse timestamp �
 }
 ```
 
-Cada novo evento faz um **upsert atômico** (`$inc` no `totalClicks`, `$setOnInsert` para os demais campos) direto no MongoDB via `MongoTemplate`, em vez de ler-modificar-gravar — isso evita perda de incrementos quando várias mensagens do mesmo minuto são consumidas em sequência rápida.
+O incremento é feito com um upsert atômico (`$inc`), então várias mensagens do mesmo minuto consumidas em sequência não se sobrescrevem.
 
-## Endpoints principais
+## Endpoints
 
-| Método | Rota                          | Descrição                                               |
-|--------|--------------------------------|-----------------------------------------------------------|
-| POST   | `/events/click`                | Publica um evento de clique no tópico Kafka `clicks`      |
-| POST   | `/events/click/generate?count=N` | Gera `N` eventos sintéticos (padrão 20), distribuídos entre páginas de exemplo |
-| GET    | `/metrics/{page}`              | Retorna a série de métricas agregadas por minuto para a página |
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/events/click` | Publica um evento de clique no tópico `clicks` |
+| `POST` | `/events/click/generate?count=N` | Gera `N` eventos sintéticos (padrão 20) |
+| `GET` | `/metrics/{page}` | Série de métricas agregadas por minuto da página |
 
-## Exemplo de uso
+## Exemplos de uso
 
 ```bash
-# Publicar um evento de clique real
 curl -s -X POST localhost:8080/events/click \
   -H "Content-Type: application/json" \
   -d '{"page": "home", "userId": "user-42"}'
+```
 
-# Gerar 50 eventos sintéticos para demonstração
+```bash
 curl -s -X POST "localhost:8080/events/click/generate?count=50"
+```
 
-# Consultar métricas agregadas da página "home" (aguarde alguns instantes
-# até o consumer processar as mensagens)
+```bash
 curl -s localhost:8080/metrics/home
 ```
+
+## Testes
+
+```bash
+./gradlew test
+```
+
+5 testes: 2 unitários e 3 de integração, que sobem Kafka e MongoDB reais em containers pelo Testcontainers.
